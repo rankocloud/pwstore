@@ -10,7 +10,7 @@ function detectLoginForms() {
   
   forms.forEach(form => {
     // 查找用户名和密码字段
-    const usernameFields = form.querySelectorAll('input[type="email"], input[type="text"], input[autocomplete="username"], input[autocomplete="email"]');
+    const usernameFields = form.querySelectorAll('input[type="email"], input[type="text"], input[autocomplete="username"], input[autocomplete="email"], input[id="username"]');
     const passwordFields = form.querySelectorAll('input[type="password"]');
     
     if (usernameFields.length > 0 && passwordFields.length > 0) {
@@ -51,7 +51,7 @@ function detectLoginForms() {
   
   // 处理没有表单的情况（单独的输入字段）
   if (detectedForms.length === 0) {
-    const usernameFields = document.querySelectorAll('input[type="email"], input[type="text"], input[autocomplete="username"], input[autocomplete="email"]');
+    const usernameFields = document.querySelectorAll('input[type="email"], input[type="text"], input[autocomplete="username"], input[autocomplete="email"], input[id="username"]');
     const passwordFields = document.querySelectorAll('input[type="password"]');
     
     if (usernameFields.length > 0 && passwordFields.length > 0) {

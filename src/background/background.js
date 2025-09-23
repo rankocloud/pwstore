@@ -8,23 +8,89 @@ importScripts('../utils/crypto.js');
 // 全局状态
 let masterPassword = null;
 let isSetupComplete = false;
+let passwordExpiryTime = null;
 const secureMem = new SecureMemory();
 
 // 初始化
 async function initialize() {
   const setup = await chrome.storage.local.get("isSetupComplete");
   isSetupComplete = setup.isSetupComplete || false;
+  
+  // 检查是否有保存的密码过期时间
+  try {
+    const stored = await chrome.storage.session.get('passwordExpiryTime');
+    if (stored.passwordExpiryTime) {
+      passwordExpiryTime = parseInt(stored.passwordExpiryTime);
+      
+      // 检查密码是否已过期
+      if (Date.now() > passwordExpiryTime) {
+        // 密码已过期，清除过期时间和内存中的密码
+        passwordExpiryTime = null;
+        await chrome.storage.session.remove('passwordExpiryTime');
+        if (masterPassword) {
+          lockVault();
+        }
+      }
+    }
+  } catch (error) {
+    console.error('获取会话存储失败:', error);
+  }
+  
+  // 设置定期检查密码过期的定时器
+  setInterval(checkPasswordExpiry, 60000); // 每分钟检查一次
+}
+
+// 检查密码是否过期
+function checkPasswordExpiry() {
+  if (passwordExpiryTime && Date.now() > passwordExpiryTime) {
+    console.log('密码已过期，自动锁定密码库');
+    lockVault();
+    passwordExpiryTime = null;
+    // 使用自执行异步函数处理异步操作
+    (async () => {
+      try {
+        await chrome.storage.session.remove('passwordExpiryTime');
+      } catch (error) {
+        console.error('移除会话存储失败:', error);
+      }
+    })();
+  }
 }
 
 // 验证主密码
-async function verifyMasterPassword(password) {
+async function verifyMasterPassword(password, rememberPassword, rememberDuration) {
   // 尝试解密存储的测试数据
   const storedTest = await chrome.storage.local.get("test_encrypted");
   if (!storedTest.test_encrypted) return false;
   
   try {
     const decrypted = await decryptData(storedTest.test_encrypted, password);
-    return decrypted === "test_data";
+    const isValid = decrypted === "test_data";
+    
+    // 如果密码有效且用户选择记住密码，则设置过期时间
+    if (isValid && rememberPassword && rememberDuration) {
+      const daysToMillis = rememberDuration * 24 * 60 * 60 * 1000;
+      passwordExpiryTime = Date.now() + daysToMillis;
+      
+      // 保存过期时间到会话存储
+      try {
+        await chrome.storage.session.set({
+          passwordExpiryTime: passwordExpiryTime.toString()
+        });
+      } catch (error) {
+        console.error('保存会话存储失败:', error);
+      }
+    } else if (isValid) {
+      // 如果密码有效但未选择记住，则清除过期时间
+      passwordExpiryTime = null;
+      try {
+        await chrome.storage.session.remove('passwordExpiryTime');
+      } catch (error) {
+        console.error('移除会话存储失败:', error);
+      }
+    }
+    
+    return isValid;
   } catch (e) {
     return false;
   }
@@ -315,6 +381,17 @@ function searchCredentials(credentials, query) {
 function lockVault() {
   masterPassword = null;
   secureMem.clear();
+  
+  // 清除密码过期时间
+  passwordExpiryTime = null;
+  // 使用自执行异步函数处理异步操作
+  (async () => {
+    try {
+      await chrome.storage.session.remove('passwordExpiryTime');
+    } catch (error) {
+      console.error('移除会话存储失败:', error);
+    }
+  })();
 }
 
 // 消息处理
@@ -328,7 +405,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return { isSetupComplete };
         
       case "VERIFY_MASTER_PASSWORD":
-        const isValid = await verifyMasterPassword(data.password);
+        const isValid = await verifyMasterPassword(
+          data.password,
+          data.rememberPassword || false,
+          data.rememberDuration
+        );
         if (isValid) {
           secureMem.store(data.password);
           masterPassword = data.password;
@@ -377,6 +458,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case "LOCK_VAULT":
         lockVault();
         return { success: true };
+        
+      case "CHECK_PASSWORD_STATUS":
+        // 检查密码是否有效且未过期
+        if (masterPassword && passwordExpiryTime && Date.now() <= passwordExpiryTime) {
+          // 计算剩余时间
+          const remainingTime = passwordExpiryTime - Date.now();
+          const remainingDays = Math.ceil(remainingTime / (1000 * 60 * 60 * 24));
+          return { 
+            success: true, 
+            isUnlocked: true, 
+            remainingDays 
+          };
+        }
+        return { success: true, isUnlocked: false };
         
       case "GENERATE_PASSWORD":
         return generatePassword(data.length, data.options);

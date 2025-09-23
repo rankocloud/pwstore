@@ -23,6 +23,20 @@ async function initialize() {
   const setupStatus = await sendMessage({ action: 'IS_SETUP_COMPLETE' });
   state.isSetupComplete = setupStatus.isSetupComplete;
   
+  // 如果已完成设置，检查密码状态
+  if (state.isSetupComplete) {
+    const passwordStatus = await sendMessage({ action: 'CHECK_PASSWORD_STATUS' });
+    if (passwordStatus.success && passwordStatus.isUnlocked) {
+      state.isUnlocked = true;
+      await loadCredentials();
+      
+      // 如果有剩余天数信息，显示提示
+      if (passwordStatus.remainingDays) {
+        console.log(`密码将在${passwordStatus.remainingDays}天后过期`);
+      }
+    }
+  }
+  
   // 渲染界面
   render();
 }
@@ -223,6 +237,23 @@ function renderUnlockScreen() {
         <input type="password" id="unlockPassword" class="form-control" placeholder="输入主密码" />
       </div>
       
+      <div class="remember-options">
+        <div class="remember-checkbox">
+          <input type="checkbox" id="rememberPassword" />
+          <label for="rememberPassword">记住密码</label>
+        </div>
+        
+        <div class="remember-duration" id="durationContainer" style="display: none;">
+          <label for="rememberDuration">记住时长：</label>
+          <select id="rememberDuration" class="form-control">
+            <option value="3">3天</option>
+            <option value="7">7天</option>
+            <option value="14">14天</option>
+            <option value="30">30天</option>
+          </select>
+        </div>
+      </div>
+      
       <button id="unlockButton" class="btn btn-block">解锁</button>
     </div>
   `;
@@ -232,11 +263,21 @@ function renderUnlockScreen() {
   document.getElementById('unlockPassword').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') handleUnlock();
   });
+  
+  // 记住密码复选框事件
+  const rememberCheckbox = document.getElementById('rememberPassword');
+  const durationContainer = document.getElementById('durationContainer');
+  
+  rememberCheckbox.addEventListener('change', () => {
+    durationContainer.style.display = rememberCheckbox.checked ? 'block' : 'none';
+  });
 }
 
 // 处理解锁
 async function handleUnlock() {
   const password = document.getElementById('unlockPassword').value;
+  const rememberPassword = document.getElementById('rememberPassword').checked;
+  const rememberDuration = rememberPassword ? parseInt(document.getElementById('rememberDuration').value) : null;
   
   if (!password) {
     alert('请输入主密码');
@@ -245,7 +286,11 @@ async function handleUnlock() {
   
   const result = await sendMessage({
     action: 'VERIFY_MASTER_PASSWORD',
-    data: { password }
+    data: { 
+      password, 
+      rememberPassword, 
+      rememberDuration 
+    }
   });
   
   if (result.success) {
