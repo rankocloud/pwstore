@@ -291,7 +291,7 @@ function requestCredentials() {
         // 使用第一个匹配的凭据自动填充
         autoFillCredentials(response.credentials[0]);
       } else {
-        console.log("requestCredentials: 未找到凭据");
+        console.log("requestCredentials: 未找到凭据");   
       }
     }
   );

@@ -13,31 +13,60 @@ const secureMem = new SecureMemory();
 
 // 初始化
 async function initialize() {
-  const setup = await chrome.storage.local.get("isSetupComplete");
-  isSetupComplete = setup.isSetupComplete || false;
-  
-  // 检查是否有保存的密码过期时间
   try {
-    const stored = await chrome.storage.session.get('passwordExpiryTime');
-    if (stored.passwordExpiryTime) {
-      passwordExpiryTime = parseInt(stored.passwordExpiryTime);
-      
-      // 检查密码是否已过期
-      if (Date.now() > passwordExpiryTime) {
-        // 密码已过期，清除过期时间和内存中的密码
-        passwordExpiryTime = null;
-        await chrome.storage.session.remove('passwordExpiryTime');
-        if (masterPassword) {
-          lockVault();
+    const setup = await chrome.storage.local.get("isSetupComplete");
+    isSetupComplete = setup.isSetupComplete || false;
+    
+    // 检查是否有保存的密码过期时间
+    try {
+      const stored = await chrome.storage.local.get('passwordExpiryTime');
+      if (stored && stored.passwordExpiryTime) {
+        passwordExpiryTime = parseInt(stored.passwordExpiryTime);
+        
+        // 检查密码是否已过期
+        if (Date.now() > passwordExpiryTime) {
+          // 密码已过期，清除过期时间和内存中的密码
+          passwordExpiryTime = null;
+          try {
+            await chrome.storage.local.remove('passwordExpiryTime');
+          } catch (e) {
+            console.error('移除本地存储失败:', e);
+          }
+          if (masterPassword) {
+            lockVault();
+          }
+        } else if (!masterPassword && isSetupComplete) {
+          // 如果密码未过期但masterPassword为null，说明浏览器重启了
+          // 延迟一会儿确保扩展完全加载后再打开解锁界面
+          setTimeout(() => {
+            openUnlockScreen();
+          }, 1000);
         }
       }
+    } catch (error) {
+      console.error('获取本地存储失败:', error);
+    }
+    
+    console.log('Background service initialized successfully');
+    
+    // 设置定期检查密码过期的定时器
+    setInterval(checkPasswordExpiry, 60000); // 每分钟检查一次
+  } catch (error) {
+    console.error('初始化失败:', error);
+  }
+}
+
+// 打开解锁界面
+function openUnlockScreen() {
+  try {
+    // 使用chrome.action.openPopup()打开扩展的弹出窗口
+    // 这个API在Manifest V3中支持
+    if (chrome.action && typeof chrome.action.openPopup === 'function') {
+      chrome.action.openPopup()
     }
   } catch (error) {
-    console.error('获取会话存储失败:', error);
+    console.error('打开解锁界面失败:', error);
   }
-  
-  // 设置定期检查密码过期的定时器
-  setInterval(checkPasswordExpiry, 60000); // 每分钟检查一次
 }
 
 // 检查密码是否过期
@@ -49,9 +78,9 @@ function checkPasswordExpiry() {
     // 使用自执行异步函数处理异步操作
     (async () => {
       try {
-        await chrome.storage.session.remove('passwordExpiryTime');
+        await chrome.storage.local.remove('passwordExpiryTime');
       } catch (error) {
-        console.error('移除会话存储失败:', error);
+        console.error('移除本地存储失败:', error);
       }
     })();
   }
@@ -67,26 +96,32 @@ async function verifyMasterPassword(password, rememberPassword, rememberDuration
     const decrypted = await decryptData(storedTest.test_encrypted, password);
     const isValid = decrypted === "test_data";
     
-    // 如果密码有效且用户选择记住密码，则设置过期时间
-    if (isValid && rememberPassword && rememberDuration) {
-      const daysToMillis = rememberDuration * 24 * 60 * 60 * 1000;
-      passwordExpiryTime = Date.now() + daysToMillis;
+    // 如果密码有效，将密码存储到内存中
+    if (isValid) {
+      masterPassword = password;
       
-      // 保存过期时间到会话存储
-      try {
-        await chrome.storage.session.set({
-          passwordExpiryTime: passwordExpiryTime.toString()
-        });
-      } catch (error) {
-        console.error('保存会话存储失败:', error);
-      }
-    } else if (isValid) {
-      // 如果密码有效但未选择记住，则清除过期时间
-      passwordExpiryTime = null;
-      try {
-        await chrome.storage.session.remove('passwordExpiryTime');
-      } catch (error) {
-        console.error('移除会话存储失败:', error);
+      // 如果用户选择记住密码，则设置过期时间
+      if (rememberPassword && rememberDuration) {
+        // 修改：从天数改为小时计算过期时间
+        const hoursToMillis = rememberDuration * 60 * 60 * 1000;
+        passwordExpiryTime = Date.now() + hoursToMillis;
+        
+        // 保存过期时间到本地存储
+        try {
+          await chrome.storage.local.set({
+            passwordExpiryTime: passwordExpiryTime.toString()
+          });
+        } catch (error) {
+          console.error('保存本地存储失败:', error);
+        }
+      } else {
+        // 如果未选择记住，则清除过期时间
+        passwordExpiryTime = null;
+        try {
+          await chrome.storage.local.remove('passwordExpiryTime');
+        } catch (error) {
+          console.error('移除本地存储失败:', error);
+        }
       }
     }
     
@@ -98,19 +133,24 @@ async function verifyMasterPassword(password, rememberPassword, rememberDuration
 
 // 设置主密码
 async function setMasterPassword(password) {
-  // 创建测试数据
-  const encryptedTest = await encryptData("test_data", password);
-  await chrome.storage.local.set({ 
-    test_encrypted: encryptedTest,
-    isSetupComplete: true
-  });
-  
-  // 安全存储主密码在内存中
-  secureMem.store(password);
-  masterPassword = password;
-  isSetupComplete = true;
-  
-  return true;
+  try {
+    // 创建测试数据
+    const encryptedTest = await encryptData("test_data", password);
+    await chrome.storage.local.set({
+      test_encrypted: encryptedTest,
+      isSetupComplete: true
+    });
+    
+    // 安全存储主密码在内存中
+    secureMem.store(password);
+    masterPassword = password;
+    isSetupComplete = true;
+    
+    return { success: true };
+  } catch (error) {
+    console.error("设置主密码失败:", error);
+    return { success: false, error: error.message };
+  }
 }
 
 // 加密并存储凭据
@@ -387,11 +427,38 @@ function lockVault() {
   // 使用自执行异步函数处理异步操作
   (async () => {
     try {
-      await chrome.storage.session.remove('passwordExpiryTime');
+      await chrome.storage.local.remove('passwordExpiryTime');
     } catch (error) {
-      console.error('移除会话存储失败:', error);
+      console.error('移除本地存储失败:', error);
     }
   })();
+}
+
+// 重置密码库
+async function resetPassword() {
+  try {
+    // 删除所有存储的数据
+    await chrome.storage.local.remove([
+      'test_encrypted', 
+      'isSetupComplete', 
+      'credentials', 
+      'categories'
+    ]);
+    
+    // 清除内存中的密码和状态
+    masterPassword = null;
+    isSetupComplete = false;
+    secureMem.clear();
+    
+    // 清除会话存储
+    await chrome.storage.session.remove('passwordExpiryTime');
+    
+    console.log('密码库已重置');
+    return { success: true };
+  } catch (error) {
+    console.error('重置密码库失败:', error);
+    return { success: false, error: error.message };
+  }
 }
 
 // 消息处理
@@ -434,10 +501,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return { success: true, credentials: domainCredentials };
         
       case "GET_CREDENTIALS":
-        return await getAllCredentials();
+        const credentials = await getAllCredentials();
+        return { success: true, credentials };
         
       case "GET_PASSWORD":
-        return await getPassword(data.id);
+        const password = await getPassword(data.id);
+        return { success: true, password };
         
       case "DELETE_CREDENTIAL":
         return await deleteCredential(data.id);
@@ -464,17 +533,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (masterPassword && passwordExpiryTime && Date.now() <= passwordExpiryTime) {
           // 计算剩余时间
           const remainingTime = passwordExpiryTime - Date.now();
-          const remainingDays = Math.ceil(remainingTime / (1000 * 60 * 60 * 24));
+          // 计算剩余小时数，向上取整
+          const remainingHours = Math.ceil(remainingTime / (1000 * 60 * 60));
           return { 
             success: true, 
             isUnlocked: true, 
-            remainingDays 
+            remainingHours 
           };
         }
         return { success: true, isUnlocked: false };
         
       case "GENERATE_PASSWORD":
         return generatePassword(data.length, data.options);
+        
+      case "RESET_PASSWORD":
+        return await resetPassword();
         
       default:
         return { success: false, error: "未知操作" };
@@ -487,4 +560,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 // 初始化
-initialize();
+chrome.runtime.onStartup.addListener(() => {
+  console.log('浏览器已启动，Service Worker 将被唤醒并执行');
+  // 执行初始化任务
+  initialize();
+});
