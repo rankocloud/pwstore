@@ -1,11 +1,11 @@
 <template>
   <div class="add-credential-form">
     <div class="form-group mb-4">
-      <label for="website" class="block text-sm font-medium text-gray-700 mb-1">网站</label>
+      <label for="origin" class="block text-sm font-medium text-gray-700 mb-1">网站</label>
       <input
         type="text"
-        v-model="form.website"
-        id="website"
+        v-model="form.origin"
+        id="origin"
         class="form-control w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary"
         placeholder="https://example.com"
       />
@@ -42,23 +42,6 @@
       />
     </div>
     
-    <div class="form-group mb-6">
-      <label for="category" class="block text-sm font-medium text-gray-700 mb-1">分类</label>
-      <select
-        v-model="form.category"
-        id="category"
-        class="form-control w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary"
-      >
-        <option value="">选择分类</option>
-        <option value="社交媒体">社交媒体</option>
-        <option value="电子邮箱">电子邮箱</option>
-        <option value="购物网站">购物网站</option>
-        <option value="金融服务">金融服务</option>
-        <option value="开发者工具">开发者工具</option>
-        <option value="其他">其他</option>
-      </select>
-    </div>
-    
     <div class="flex space-x-3">
       <button
         type="button"
@@ -81,20 +64,43 @@
 <script>
 export default {
   name: 'AddCredentialForm',
+  props: {
+    editingCredential: {
+      type: Object,
+      default: null
+    }
+  },
   data() {
     return {
       form: {
-        website: '',
+        origin: '',
         username: '',
-        password: '',
-        category: ''
+        password: ''
       }
+    }
+  },
+  watch: {
+    editingCredential: {
+      handler(newVal) {
+        if (newVal) {
+          // 填充表单数据
+          this.form = {
+            origin: newVal.origin || '',
+            username: newVal.username || '',
+            password: newVal.password || ''
+          }
+        } else {
+          // 重置表单
+          this.resetForm()
+        }
+      },
+      immediate: true
     }
   },
   methods: {
     handleSave() {
       // 表单验证
-      if (!this.form.website) {
+      if (!this.form.origin) {
         alert('请输入网站地址')
         return
       }
@@ -112,7 +118,7 @@ export default {
       // 构造凭据对象
       const credential = {
         ...this.form,
-        updatedAt: new Date().toISOString()
+        timestamp: Date.now()
       }
       
       // 发送保存事件
@@ -123,10 +129,9 @@ export default {
     },
     resetForm() {
       this.form = {
-        website: '',
+        origin: '',
         username: '',
-        password: '',
-        category: ''
+        password: ''
       }
     },
     generatePassword() {

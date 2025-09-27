@@ -543,6 +543,35 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
         return { success: true, isUnlocked: false };
         
+      case "GET_PAGE_RECOGNITION_SETTINGS":
+        try {
+          const stored = await chrome.storage.local.get('pageRecognitionSettings');
+          return {
+            success: true,
+            settings: stored.pageRecognitionSettings || []
+          };
+        } catch (error) {
+          console.error('获取页面识别设置失败:', error);
+          return {
+            success: false,
+            error: error.message
+          };
+        }
+        
+      case "SAVE_PAGE_RECOGNITION_SETTINGS":
+        try {
+          await chrome.storage.local.set({
+            pageRecognitionSettings: data || []
+          });
+          return { success: true };
+        } catch (error) {
+          console.error('保存页面识别设置失败:', error);
+          return {
+            success: false,
+            error: error.message
+          };
+        }
+        
       case "GENERATE_PASSWORD":
         return generatePassword(data.length, data.options);
         

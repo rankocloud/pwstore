@@ -1,7 +1,7 @@
 <template>
   <div class="credential-item p-3 border border-gray-200 rounded-md mb-3 hover:shadow-md transition-shadow">
     <div class="flex justify-between items-start mb-2">
-      <h3 class="font-medium text-lg">{{ credential.website }}</h3>
+      <h3 class="font-medium text-lg">{{ credential.origin }}</h3>
       <div class="flex space-x-2">
         <button 
           class="text-gray-500 hover:text-primary transition-colors"
@@ -44,11 +44,7 @@
         <span class="text-gray-400">••••••••</span>
       </div>
     </div>
-    
-    <div class="text-xs text-gray-500 flex justify-between items-center">
-      <span v-if="credential.category">分类: {{ credential.category }}</span>
-      <span>{{ formatDate(credential.updatedAt) }}</span>
-    </div>
+
   </div>
 </template>
 

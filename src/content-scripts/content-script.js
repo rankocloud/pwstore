@@ -2,97 +2,154 @@
  * 内容脚本 - 负责网页表单识别与数据捕获
  */
 
+let plainPassword = '';
+let usernameSelector = 'input[type="email"], input[type="text"], input[autocomplete="username"], input[autocomplete="email"], input[id="username"]';
+let passwordSelector = 'input[type="password"], input[autocomplete="current-password"], input[autocomplete="password"]';
+let loginButtonSelector = 'button[type="submit"], input[type="submit"], button, input[type="button"], [onclick]';
+let useUsernameSetting = false;
+let usePasswordSetting = false;
+let useLoginButtonSetting = false;
+
 // 检测登录表单
 function detectLoginForms() {
-  // 查找页面上所有表单
-  const forms = document.querySelectorAll('form');
-  const detectedForms = [];
-  
-  forms.forEach(form => {
-    // 查找用户名和密码字段
-    const usernameFields = form.querySelectorAll('input[type="email"], input[type="text"], input[autocomplete="username"], input[autocomplete="email"], input[id="username"]');
-    const passwordFields = form.querySelectorAll('input[type="password"]');
-    
-    if (usernameFields.length > 0 && passwordFields.length > 0) {
-      // 识别为登录表单
-      const formData = {
-        action: form.action || window.location.href,
-        usernameField: usernameFields[0],
-        passwordField: passwordFields[0],
-        submitButton: form.querySelector('button[type="submit"], input[type="submit"], button:not([type]), input[type="button"], button')
-      };
-      
-      detectedForms.push(formData);
-      
-      // 为表单添加提交事件监听器
-      form.addEventListener('submit', (e) => {
-        console.log('表单提交被捕获');
-        captureCredentials(formData);
-      });
-      
-      // 添加点击提交按钮的监听器（处理不触发submit事件的情况）
-      if (formData.submitButton) {
-        formData.submitButton.addEventListener('click', () => {
-          console.log('提交按钮点击被捕获');
-          // 立即捕获凭据（表单提交前）
-          captureCredentials(formData);
-          // 再设置一个延迟捕获，以防表单在提交前有修改
-          setTimeout(() => captureCredentials(formData), 100);
-        });
-      }
-      
-      // 添加表单重置前的事件监听，捕获重置前的最后状态
-      form.addEventListener('reset', (e) => {
-        console.log('表单重置被捕获，尝试在重置前保存凭据');
-        captureCredentials(formData);
-      });
+  let pageRecognitionSettings = [];
+  // 获取页面识别配置
+  chrome.runtime.sendMessage({ action: 'GET_PAGE_RECOGNITION_SETTINGS' }, (response) => {
+    if (chrome.runtime.lastError) {
+      console.error('获取页面识别配置失败:', chrome.runtime.lastError.message);
+      return;
     }
+    pageRecognitionSettings = response.settings;
+    console.log('页面识别配置:', pageRecognitionSettings);
   });
-  
-  // 处理没有表单的情况（单独的输入字段）
-  if (detectedForms.length === 0) {
-    const usernameFields = document.querySelectorAll('input[type="email"], input[type="text"], input[autocomplete="username"], input[autocomplete="email"], input[id="username"]');
-    const passwordFields = document.querySelectorAll('input[type="password"]');
-    
-    if (usernameFields.length > 0 && passwordFields.length > 0) {
-      // 查找可能的提交按钮
-      const possibleSubmitButtons = document.querySelectorAll('button, input[type="submit"], input[type="button"]');
-      let submitButton = null;
-      
-      // 尝试找到最接近密码字段的按钮
-      if (possibleSubmitButtons.length > 0) {
-        submitButton = possibleSubmitButtons[0];
-        for (const btn of possibleSubmitButtons) {
-          if (btn.textContent.toLowerCase().includes('登录') || 
-              btn.textContent.toLowerCase().includes('login') ||
-              btn.value?.toLowerCase().includes('登录') ||
-              btn.value?.toLowerCase().includes('login')) {
-            submitButton = btn;
-            break;
-          }
-        }
+
+  if(pageRecognitionSettings.length > 0) {
+    pageRecognitionSettings = pageRecognitionSettings.filter(item => item.domain === window.location.hostname);
+  }
+
+  let useUsernameSetting = false;
+  let usePasswordSetting = false;
+  let useLoginButtonSetting = false;
+
+  if(pageRecognitionSettings.length > 0) {
+    const setting = pageRecognitionSettings[0];
+    if(setting.usernameSelector) {
+      useUsernameSetting = true;
+      usernameSetting = setting.usernameSelector;
+      if(usernameSetting.type === 'attribute') {
+        usernameSelector = `input[${usernameSetting.value}]`;
+      } 
+      else {
+        usernameSelector = `input[${usernameSetting.type}="${usernameSetting.value}"]`;
       }
-      
-      const formData = {
-        action: window.location.href,
-        usernameField: usernameFields[0],
-        passwordField: passwordFields[0],
-        submitButton: submitButton
-      };
-      
-      detectedForms.push(formData);
-      
-      // 为提交按钮添加点击事件
-      if (submitButton) {
-        submitButton.addEventListener('click', () => {
-          console.log('提交按钮点击被捕获（无表单）');
-          setTimeout(() => captureCredentials(formData), 100);
-        });
+    }
+    if(setting.passwordSelector) {
+      usePasswordSetting = true;
+      passwordSetting = setting.passwordSelector;
+      if(passwordSetting.type === 'attribute') {
+        passwordSelector = `input[${passwordSetting.value}]`;
+      } 
+      else {
+        passwordSelector = `input[${passwordSetting.type}="${passwordSetting.value}"]`;
+      }
+    }
+    if(setting.loginButtonSelector) {
+      useLoginButtonSetting = true;
+      loginButtonSetting = setting.loginButtonSelector;
+      let eleType = 'input';
+      if(loginButtonSelector.element === 'button') {
+        eleType = 'button';
+      }
+      if(loginButtonSetting.type === 'attribute') {
+        loginButtonSelector = `${eleType}[${loginButtonSetting.value}]`;
+      } 
+      else {
+        loginButtonSelector = `${eleType}[${loginButtonSetting.type}="${loginButtonSetting.value}"]`;
       }
     }
   }
-  
-  return detectedForms;
+
+  // 查找页面上所有表单
+  const forms = document.querySelectorAll('form');
+  forms.forEach(form => {
+    // 查找用户名和密码字段
+    const usernameFields = form.querySelectorAll(usernameSelector);
+    const passwordFields = form.querySelectorAll(passwordSelector);
+
+    // 过滤掉隐藏的元素
+    usernameFields = Array.from(usernameFields).filter(item => {
+      const eleStyle = getComputedStyle(item);
+      return eleStyle.display !== 'none' && eleStyle.visibility !== 'hidden';
+    })
+    passwordFields = Array.from(passwordFields).filter(item => {
+      const eleStyle = getComputedStyle(item);
+      return eleStyle.display !== 'none' && eleStyle.visibility !== 'hidden';
+    })
+
+    if(usernameFields.length === 0 || passwordFields.length === 0) {
+      return;
+    }
+
+    // 点击登录后，密码输入框的文本可能会被加密，需要实时读取密码输入框文本
+    passwordFields[0].addEventListener('input', (e) => {
+      plainPassword = e.target.value;
+      console.log('密码输入中：', '*'.repeat(e.target.value.length));
+    })
+    
+    const candidateSubmitButtons = form.querySelectorAll(loginButtonSelector);
+    if(candidateSubmitButtons.length === 0) {
+      return;
+    }
+    let submitButton = null;
+    if(userLoginButtonSetting) {
+      submitButton = candidateSubmitButtons[0];
+    }
+    else {
+      // 进一步筛选，文本包含登录、提交、sign in、log in、submit
+      for (let btn of candidateSubmitButtons) {
+        const text = btn.textContent.trim().toLowerCase();
+        if(!text) {
+          text = btn.value.trim().toLowerCase();
+        }
+        if(
+          text.includes('登录') || 
+          text.includes('提交') || 
+          text.includes('sign in') || 
+          text.includes('log in') ||
+          text.includes('submit')) {
+          submitButton = btn;
+          break;
+        }
+      }
+    }
+
+    if(!submitButton) {
+      submitButton = candidateSubmitButtons[0];
+    }
+    
+    
+    // 构造表单数据
+    const formData = {
+      usernameField: usernameFields[0],
+    }
+    // 监听登录点击事件
+    submitButton.addEventListener('click',async function(e){
+      console.log('检测到登录按钮点击', e.target);
+      captureCredentials(formData);
+      await delay(1000);
+    });
+    
+    // 为表单添加提交事件监听器
+    form.addEventListener('submit',async function(e){
+      console.log('表单提交被捕获');
+      captureCredentials(formData);
+      await delay(1000);
+    });
+  });
+}
+
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 // 捕获凭据
@@ -101,20 +158,18 @@ function captureCredentials(formData) {
   
   // 获取表单数据
   const username = formData.usernameField.value;
-  const password = formData.passwordField.value;
-  const origin = new URL(formData.action || window.location.href).origin;
-  const hostname = window.location.hostname;
+  const password = plainPassword;
+  const origin = window.location.hostname;
   
   console.log("captureCredentials: 表单数据", {
     username: username ? username : '空',
     password: password ? '******' : '空',
-    origin: origin,
-    action: formData.action || window.location.href
+    origin
   });
   
   // 检查用户名和密码是否有效
   if (username && password) {
-    console.log(`captureCredentials: 尝试保存凭据: 网站 ${hostname}, 用户名 ${username}`);
+    console.log(`captureCredentials: 尝试保存凭据: 网站 ${origin}, 用户名 ${username}`);
     
     // 向后台发送消息保存凭据，添加回调处理
     chrome.runtime.sendMessage({
@@ -147,22 +202,39 @@ function captureCredentials(formData) {
 // 自动填充凭据
 function autoFillCredentials(credentials) {
   const { username, password } = credentials;
+
+  let usernameField = null;
+  let passwordField = null;
   
-  // 查找用户名/邮箱字段
-  const usernameFields = document.querySelectorAll('input[type="email"], input[type="text"], input[autocomplete="username"], input[autocomplete="email"]');
-  const passwordFields = document.querySelectorAll('input[type="password"]');
-  
-  if (usernameFields.length > 0 && passwordFields.length > 0) {
-    // 优先填充标记了autocomplete属性的字段
-    const emailField = document.querySelector('input[autocomplete="email"], input[autocomplete="username"]');
-    const passField = document.querySelector('input[autocomplete="current-password"], input[autocomplete="password"]');
-    
-    // 用户名字段填充
-    let filledUsernameField = null;
-    if (emailField) {
-      emailField.value = username;
-      filledUsernameField = emailField;
-    } else {
+  // 查找用户名和密码字段
+  let usernameFields = document.querySelectorAll(usernameSelector);
+  let passwordFields = document.querySelectorAll(passwordSelector);
+
+  // 过滤掉隐藏的元素
+  usernameFields = Array.from(usernameFields).filter(item => {
+    const eleStyle = getComputedStyle(item);
+    return eleStyle.display !== 'none' && eleStyle.visibility !== 'hidden';
+  })
+  passwordFields = Array.from(passwordFields).filter(item => {
+    const eleStyle = getComputedStyle(item);
+    return eleStyle.display !== 'none' && eleStyle.visibility !== 'hidden';
+  })
+
+  if(usernameFields.length === 0 || passwordFields.length === 0) {
+    return;
+  }
+  usernameField = usernameFields[0];
+  passwordField = passwordFields[0];
+
+  // 如果没有设置表单识别设置，优先填充标记了autocomplete属性的字段
+  if(!useUsernameSetting) {
+    const filteredUsernameFields = Array.from(usernameFields).filter(field => {
+      return field.matches('input[autocomplete="email"], input[autocomplete="username"]');
+    });
+    if(filteredUsernameFields.length > 0) {
+      usernameField = filteredUsernameFields[0];
+    }
+    else {
       // 尝试找到最可能的用户名字段
       for (const field of usernameFields) {
         const fieldId = field.id.toLowerCase();
@@ -174,42 +246,38 @@ function autoFillCredentials(credentials) {
             fieldName.includes('user') || fieldName.includes('email') || fieldName.includes('login') ||
             fieldPlaceholder.includes('用户') || fieldPlaceholder.includes('邮箱') || 
             fieldPlaceholder.includes('user') || fieldPlaceholder.includes('email')) {
-          field.value = username;
-          filledUsernameField = field;
+          usernameField = field;
           break;
         }
       }
-      
-      // 如果没有找到匹配的字段，使用第一个
-      if (!filledUsernameField && usernameFields.length > 0) {
-        usernameFields[0].value = username;
-        filledUsernameField = usernameFields[0];
-      }
     }
-    
-    // 密码字段填充
-    let filledPasswordField = null;
-    if (passField) {
-      passField.value = password;
-      filledPasswordField = passField;
-    } else if (passwordFields.length > 0) {
-      passwordFields[0].value = password;
-      filledPasswordField = passwordFields[0];
-    }
-    
-    // 触发输入事件以更新表单状态
-    const events = ['input', 'change', 'blur'];
-    [filledUsernameField, filledPasswordField].forEach(field => {
-      if (field) {
-        events.forEach(event => {
-          field.dispatchEvent(new Event(event, { bubbles: true }));
-        });
-      }
-    });
-    
-    // 显示填充成功通知
-    showNotification('已自动填充登录信息');
   }
+  if(!usePasswordSetting) {
+    const filteredPasswordFields = Array.from(passwordFields).filter(field => {
+      return field.matches('input[autocomplete="current-password"], input[autocomplete="password"]');
+    });
+    if(filteredPasswordFields.length > 0) {
+      passwordField = filteredPasswordFields[0];
+    }
+  }
+
+  console.log('autoFillCredentials: 用户名字段', usernameField);
+  console.log('autoFillCredentials: 密码字段', passwordField);
+
+  // 用户名和密码填充
+  usernameField.value = username;
+  passwordField.value = password;
+  // 触发输入事件以更新表单状态
+  const events = ['input', 'change', 'blur'];
+  [usernameField, passwordField].forEach(field => {
+    if (field) {
+      events.forEach(event => {
+        field.dispatchEvent(new Event(event, { bubbles: true }));
+      });
+    }
+  });
+  // 显示填充成功通知
+  showNotification('已自动填充登录信息');
 }
 
 // 显示通知
@@ -278,8 +346,7 @@ function initialize() {
 
 // 请求当前网站的凭据
 function requestCredentials() {
-  const currentUrl = window.location.href;
-  const domain = new URL(currentUrl).hostname;
+  const domain = window.location.hostname;
   
   console.log("requestCredentials: 请求域名凭据", { domain: domain });
   

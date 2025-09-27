@@ -13,7 +13,7 @@
     </div>
     
     <!-- 选项卡 -->
-    <div class="tabs flex border-b">
+    <div class="tabs flex border-b flex-wrap">
       <button 
         :class="['flex-1 py-2 px-4 text-center', activeTab === 'credentials' ? 'border-b-2 border-primary text-primary' : 'text-gray-600']"
         @click="switchTab('credentials')"
@@ -30,7 +30,13 @@
         :class="['flex-1 py-2 px-4 text-center', activeTab === 'settings' ? 'border-b-2 border-primary text-primary' : 'text-gray-600']"
         @click="switchTab('settings')"
       >
-        设置
+        基础设置
+      </button>
+      <button 
+        :class="['flex-1 py-2 px-4 text-center', activeTab === 'pageRecognition' ? 'border-b-2 border-primary text-primary' : 'text-gray-600']"
+        @click="switchTab('pageRecognition')"
+      >
+        页面识别设置
       </button>
     </div>
     
@@ -70,12 +76,21 @@
       
       <!-- 添加凭据表单 -->
       <div v-if="activeTab === 'add'" class="add-credential-form">
-        <AddCredentialForm @save="handleAddCredential" @cancel="switchTab('credentials')" />
+        <AddCredentialForm 
+          :editing-credential="editingCredential"
+          @save="handleAddCredential" 
+          @cancel="switchTab('credentials')"
+        />
       </div>
       
       <!-- 设置页面 -->
       <div v-if="activeTab === 'settings'" class="settings">
         <SettingsForm @update="handleSettingsUpdate" />
+      </div>
+      
+      <!-- 页面识别设置页面 -->
+      <div v-if="activeTab === 'pageRecognition'" class="page-recognition-settings">
+        <PageRecognitionSettings />
       </div>
     </div>
   </div>
@@ -85,19 +100,22 @@
 import CredentialItem from './CredentialItem.vue'
 import AddCredentialForm from './AddCredentialForm.vue'
 import SettingsForm from './SettingsForm.vue'
+import PageRecognitionSettings from './PageRecognitionSettings.vue'
 
 export default {
   name: 'MainInterface',
   components: {
     CredentialItem,
     AddCredentialForm,
-    SettingsForm
+    SettingsForm,
+    PageRecognitionSettings
   },
   data() {
     return {
       credentials: [],
       activeTab: 'credentials',
-      searchQuery: ''
+      searchQuery: '',
+      editingCredential: null
     }
   },
   computed: {
@@ -133,8 +151,8 @@ export default {
     },
     async handleAddCredential(credential) {
       const response = await this.sendMessage({
-        action: 'ADD_CREDENTIAL',
-        credential
+        action: 'SAVE_CREDENTIAL',
+        data: credential
       })
       
       if (response.success) {
@@ -145,10 +163,11 @@ export default {
         alert('添加失败: ' + response.error)
       }
     },
+
     async handleEditCredential(credential) {
-      // 这里可以实现编辑逻辑，比如打开编辑对话框
-      // 为了简化，这里先不实现完整的编辑功能
-      alert('编辑功能尚未实现')
+      // 设置为编辑模式并保存当前要编辑的凭据
+      this.activeTab = 'add'
+      this.editingCredential = credential
     },
     async handleDeleteCredential(id) {
       if (confirm('确定要删除这个凭据吗？')) {
